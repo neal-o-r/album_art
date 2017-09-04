@@ -33,12 +33,12 @@ def create_bottlebeck_features():
 		train_data_dir,
 		target_size=(img_width, img_height),
 		batch_size=batch_size,
-		class_mode=,
+		class_mode=None,
 		shuffle=False)
 
 	print('Predicting training features...')    
-	#bottleneck_features_train = model.predict_generator(
-	#	generator, nb_train_samples // batch_size, verbose=1)
+	bottleneck_features_train = model.predict_generator(
+		generator, nb_train_samples // batch_size, verbose=1)
 
 	print('Saving...')
 	
