@@ -11,6 +11,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import glob
 from sklearn.metrics import confusion_matrix
+from sklearn import preprocessing
 
 
 img_width, img_height = 350, 350
@@ -19,7 +20,7 @@ train_data_dir = 'data/train'
 test_data_dir  = 'data/test'
 nb_train_samples = 6755
 nb_validation_samples = 3058
-epochs = 25
+epochs = 10
 batch_size = 16
 
 
@@ -72,9 +73,8 @@ def create_bottlebeck_features():
 def train_model(train_labels, test_labels):
 
 	print('Loading features...')
-	train_data = np.load('bottleneck_features_train.npy')
-
-	test_data = np.load('bottleneck_features_validation.npy')
+	classes = [i.split('/')[-1].split('_')[0] 
+			for i in glob.glob(test_data_dir+'/*')]
 
 	model = Sequential()
 	model.add(Flatten(input_shape=train_data.shape[1:]))
@@ -85,8 +85,8 @@ def train_model(train_labels, test_labels):
 	model.add(Dropout(0.5))
 	model.add(Dense(10, activation='softmax'))
 
-	rmsprop = optimizers.RMSprop(lr=0.01)
-	model.compile(optimizer=rmsprop,
+	opt = optimizers.SGD(lr=0.01, decay=1e-6)
+	model.compile(optimizer=opt,
 		  loss='categorical_crossentropy', metrics=['accuracy'])
 
 	print('Fitting Model.')
@@ -96,18 +96,14 @@ def train_model(train_labels, test_labels):
 	
 	p = model.predict_proba(test_data)
 	
-	confusion(p, test_labels)
+	confusion(p.argmax(1), test_labels.argmax(1))
 
-	return model
+	return train_data, test_data, model, p
 
 
-def confusion(y_p, y_t):
+def confusion(y_p, y_t, classes):
 
-	classes = [i.split('/')[-1].split('_')[0] 
-			for i in glob.glob(test_data_dir+'/*')]
-
-	cij = confusion_matrix(y_p.argmax(1), y_t.argmax(1))
-	
+	cij = confusion_matrix(y_p, y_t)
 	cij = (cij.T / cij.sum(1)).T 
 
 	df = pd.DataFrame(cij, index=classes, columns=classes)
@@ -119,12 +115,7 @@ def confusion(y_p, y_t):
 
 
 train_labels, test_labels = create_bottlebeck_features()
-m = train_model(train_labels, test_labels)
-
-
-
-
-
+train, test, m, p = train_model(train_labels, test_labels)
 
 
 
