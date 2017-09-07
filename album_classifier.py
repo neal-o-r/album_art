@@ -1,121 +1,78 @@
+from keras.applications import VGG16
 import os
-from keras.preprocessing.image import ImageDataGenerator
-from keras.models import Sequential
-from keras import optimizers
-from keras.layers import Dropout, Flatten, Dense
-from keras import applications
-from keras.utils import to_categorical
 import numpy as np
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-import glob
-from sklearn.metrics import confusion_matrix
-from sklearn import preprocessing
+from keras.preprocessing.image import ImageDataGenerator
+from keras import models
+from keras import layers
+from keras import optimizers
+from keras.utils import to_categorical
+from keras import regularizers
 
 
-img_width, img_height = 350, 350
+base_dir = 'data/'
 
-train_data_dir = 'data/train'
-test_data_dir  = 'data/test'
-nb_train_samples = 6755
-nb_validation_samples = 3058
-epochs = 10
-batch_size = 16
+train_dir = os.path.join(base_dir, 'train')
+test_dir  = os.path.join(base_dir, 'test')
 
 
-def create_bottlebeck_features():
+def extract_features(directory, sample_count):
+    datagen = ImageDataGenerator(rescale=1./255)
+    batch_size = 20
 
-	datagen = ImageDataGenerator(rescale=1/255.)
-
-	model = applications.VGG16(include_top=False, weights='imagenet')
-
-	generator = datagen.flow_from_directory(
-		train_data_dir,
-		target_size=(img_width, img_height),
-		batch_size=batch_size,
-		class_mode=None,
-		shuffle=False)
-
-	print('Predicting training features...')    
-	bottleneck_features_train = model.predict_generator(
-		generator, nb_train_samples // batch_size, verbose=1)
-
-	print('Saving...')
-	
-	np.save('bottleneck_features_train.npy',
-		bottleneck_features_train)
-
-	train_labels = to_categorical(generator.classes)
+    conv_base = VGG16(weights='imagenet',
+                  include_top=False,
+                  input_shape=(150, 150, 3))
 
 
-	generator = datagen.flow_from_directory(
-		test_data_dir,
-		target_size=(img_width, img_height),
-		batch_size=batch_size,
-		class_mode=None,
-		shuffle=False)
+    features = np.zeros(shape=(sample_count, 4, 4, 512))
+    labels = np.zeros(shape=(sample_count))
+    generator = datagen.flow_from_directory(
+        directory,
+        target_size=(150, 150),
+        batch_size=batch_size,
+        class_mode='categorical')
 
-	test_labels = to_categorical(generator.classes)
-	
-	print('Predicting test features...')
-	bottleneck_features_validation = model.predict_generator(
-		generator, nb_validation_samples // batch_size, verbose=1)
-	
-	
-	print('Saving...')
-	np.save('bottleneck_features_validation.npy',
-		bottleneck_features_validation)
+    i = 0
+    for inputs_batch, labels_batch in generator:
 
-	return train_labels, test_labels
+        features_batch = conv_base.predict(inputs_batch, verbose=1)
+        features[i * batch_size : (i + 1) * batch_size] = features_batch
+        labels[i * batch_size : (i + 1) * batch_size] = labels_batch.argmax()
+        i += 1
+        if i * batch_size >= sample_count:
+            break
 
-
-def train_model(train_labels, test_labels):
-
-	print('Loading features...')
-	classes = [i.split('/')[-1].split('_')[0] 
-			for i in glob.glob(test_data_dir+'/*')]
-
-	model = Sequential()
-	model.add(Flatten(input_shape=train_data.shape[1:]))
-	model.add(Dense(4096, activation='relu'))
-	model.add(Dense(1024, activation='relu'))
-	model.add(Dropout(0.5))
-	model.add(Dense(256, activation='relu'))
-	model.add(Dropout(0.5))
-	model.add(Dense(10, activation='softmax'))
-
-	opt = optimizers.SGD(lr=0.01, decay=1e-6)
-	model.compile(optimizer=opt,
-		  loss='categorical_crossentropy', metrics=['accuracy'])
-
-	print('Fitting Model.')
-	model.fit(train_data, train_labels,
-	      epochs=epochs,
-	      batch_size=batch_size)
-	
-	p = model.predict_proba(test_data)
-	
-	confusion(p.argmax(1), test_labels.argmax(1))
-
-	return train_data, test_data, model, p
+    return features, labels
 
 
-def confusion(y_p, y_t, classes):
+train_features, train_labels = extract_features(train_dir, 6500)
+test_features, test_labels = extract_features(test_dir, 3000)
 
-	cij = confusion_matrix(y_p, y_t)
-	cij = (cij.T / cij.sum(1)).T 
+train_features = np.reshape(train_features, (-1, 4 * 4 * 512))
+test_features = np.reshape(test_features, (-1, 4 * 4 * 512))
 
-	df = pd.DataFrame(cij, index=classes, columns=classes)
+train_labels = to_categorical(train_labels)
+test_labels = to_categorical(test_labels)
 
-	sns.set(font_scale=0.7)
-	sns.heatmap(df, annot=True, linewidths=0.2)
-
-	plt.show()
-
-
-train_labels, test_labels = create_bottlebeck_features()
-train, test, m, p = train_model(train_labels, test_labels)
+np.save('npy/train_features.npy', train_features)
+np.save('npy/test_features.npy', test_features)
+np.save('npy/train_labels.npy', train_labels)
+np.save('npy/test_labels.npy', test_labels)
 
 
+model = models.Sequential()
+model.add(layers.Dense(256, activation='relu', input_dim=4 * 4 * 512, 
+		kernel_regularizer=regularizers.l2(0.01),
+                activity_regularizer=regularizers.l1(0.01)))
 
+model.add(layers.Dropout(0.5))
+model.add(layers.Dense(10, activation='softmax'))
+
+model.compile(optimizer=optimizers.RMSprop(lr=2e-5),
+              loss='categorical_crossentropy',
+              metrics=['acc'])
+
+history = model.fit(train_features, train_labels,
+                    epochs=5,
+                    batch_size=20,
+		    validation_data=(test_features, test_labels))
