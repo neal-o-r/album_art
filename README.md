@@ -8,5 +8,5 @@ I've built two models:
 
 * a CNN, using the VGG16 net's weights with the top 4 dense layers re-trained.
 
-![confusion](confusion.jpg) 
+![confusion](confusion.png) 
  
